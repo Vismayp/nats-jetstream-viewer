@@ -596,6 +596,122 @@ pre {
 .consumer > code {
   color: var(--green);
 }
+.stream-state {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.7fr);
+  min-height: 480px;
+}
+.stream-list {
+  padding: 16px;
+  border-right: 1px solid var(--line);
+  background: #09130f;
+}
+.stream-card {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  background: #0b1613;
+  text-align: left;
+}
+.stream-card:hover,
+.stream-card.selected {
+  border-color: var(--green);
+  background: #10231c;
+}
+.stream-card > span,
+.stream-card small,
+.stream-consumer > span,
+.stream-consumer div > span {
+  font: 500 10px DM Mono;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.stream-card > span {
+  color: var(--green);
+  text-transform: uppercase;
+}
+.stream-card strong {
+  font-size: 15px;
+}
+.stream-detail {
+  min-width: 0;
+}
+.stream-detail-head {
+  padding: 18px 20px;
+}
+.stream-detail-head .primary {
+  width: auto;
+  margin: 0;
+}
+.stream-metrics {
+  border-bottom: 1px solid var(--line);
+}
+.stream-config {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+.stream-config > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.stream-config > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+.stream-config > div:nth-child(odd) {
+  border-right: 1px solid var(--line);
+}
+.stream-config dt,
+.stream-consumers h4 {
+  margin: 0;
+  font: 500 10px DM Mono;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.stream-config dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font: 500 11px DM Mono;
+  color: var(--ink);
+}
+.stream-consumers {
+  padding: 20px;
+}
+.stream-consumers h4 {
+  margin-bottom: 12px;
+}
+.stream-consumer {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.5fr) repeat(3, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #0b1613;
+}
+.stream-consumer + .stream-consumer {
+  margin-top: 8px;
+}
+.stream-consumer div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.stream-consumer strong {
+  overflow-wrap: anywhere;
+}
 .section-head {
   display: flex;
   justify-content: space-between;

@@ -7,10 +7,12 @@ import {
   type Message,
   type Profile,
   type Stream,
+  type StreamConsumer,
+  type StreamInfo,
 } from "./api";
 import "./styles.css";
 
-type Page = "messages" | "consumers" | "decoders" | "connections";
+type Page = "messages" | "streams" | "consumers" | "decoders" | "connections";
 
 function useLoad<T>(path: string | null, deps: React.DependencyList = []) {
   const [data, setData] = useState<T>();
@@ -160,7 +162,7 @@ function Console({ onLogout }: { onLogout: () => void }) {
       <aside>
         <Logo />
         <nav>
-          {(["messages", "consumers", "decoders", "connections"] as Page[]).map(
+          {(["messages", "streams", "consumers", "decoders", "connections"] as Page[]).map(
             (item) => (
               <button
                 key={item}
@@ -246,6 +248,16 @@ function Console({ onLogout }: { onLogout: () => void }) {
             streams={streams.data ?? []}
           />
         )}
+        {page === "streams" && (
+          <Streams
+            profileId={profileId}
+            streams={streams.data ?? []}
+            onBrowseMessages={(name) => {
+              setStreamName(name);
+              setPage("messages");
+            }}
+          />
+        )}
         {page === "decoders" && (
           <Decoders profileId={profileId} streams={streams.data ?? []} />
         )}
@@ -267,11 +279,152 @@ function Console({ onLogout }: { onLogout: () => void }) {
 function NavIcon({ item }: { item: Page }) {
   const icons = {
     messages: "≋",
+    streams: "▤",
     consumers: "⇄",
     decoders: "{ }",
     connections: "⌘",
   };
   return <span>{icons[item]}</span>;
+}
+
+function Streams({
+  profileId,
+  streams,
+  onBrowseMessages,
+}: {
+  profileId: string;
+  streams: Stream[];
+  onBrowseMessages: (name: string) => void;
+}) {
+  const [selected, setSelected] = useState("");
+  useEffect(() => {
+    if (!streams.some((stream) => stream.name === selected)) setSelected("");
+  }, [streams, selected]);
+  const info = useLoad<StreamInfo>(
+    profileId && selected
+      ? `/profiles/${profileId}/streams/${encodeURIComponent(selected)}`
+      : null,
+    [profileId, selected],
+  );
+  return (
+    <main className="content streams-content">
+      <section className="panel streams-panel">
+        <div className="section-head">
+          <div>
+            <span>JETSTREAM STREAMS</span>
+            <h3>Click a stream to inspect its current state</h3>
+          </div>
+          {selected && (
+            <button className="refresh" onClick={info.reload}>
+              ↻ Refresh state
+            </button>
+          )}
+        </div>
+        <div className="read-only-note">
+          <b>METADATA ONLY</b>
+          <span>
+            Inspecting state does not create consumers, deliver messages, or
+            acknowledge anything.
+          </span>
+        </div>
+        {!profileId ? (
+          <div className="empty">Select a connection to list its streams</div>
+        ) : !streams.length ? (
+          <div className="empty">No streams found on this connection</div>
+        ) : (
+          <div className="stream-state">
+            <div className="stream-list" aria-label="Streams">
+              {streams.map((stream) => (
+                <button
+                  key={stream.name}
+                  type="button"
+                  className={`stream-card ${selected === stream.name ? "selected" : ""}`}
+                  onClick={() => setSelected(stream.name)}
+                >
+                  <span>{stream.retention}</span>
+                  <strong>{stream.name}</strong>
+                  <small>
+                    {stream.messages.toLocaleString()} messages · {formatBytes(stream.bytes)}
+                  </small>
+                </button>
+              ))}
+            </div>
+            <div className="stream-detail" aria-live="polite">
+              {!selected ? (
+                <div className="empty">Choose a stream to load its state</div>
+              ) : info.error ? (
+                <div className="banner error">{info.error}</div>
+              ) : info.loading ? (
+                <Loading />
+              ) : info.data ? (
+                <StreamState
+                  info={info.data}
+                  onBrowseMessages={onBrowseMessages}
+                />
+              ) : null}
+            </div>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function StreamState({
+  info,
+  onBrowseMessages,
+}: {
+  info: StreamInfo;
+  onBrowseMessages: (name: string) => void;
+}) {
+  const { stream, consumers } = info;
+  return (
+    <>
+      <div className="section-head stream-detail-head">
+        <div>
+          <span>STREAM STATE</span>
+          <h3>{stream.name}</h3>
+        </div>
+        <button className="primary" onClick={() => onBrowseMessages(stream.name)}>
+          Browse messages →
+        </button>
+      </div>
+      <section className="metric-row stream-metrics">
+        <Metric label="STORED" value={stream.messages.toLocaleString()} />
+        <Metric label="BYTES" value={formatBytes(stream.bytes)} />
+        <Metric label="FIRST SEQUENCE" value={stream.firstSequence} />
+        <Metric label="LAST SEQUENCE" value={stream.lastSequence} />
+      </section>
+      <dl className="stream-config">
+        <div><dt>Retention</dt><dd>{stream.retention}</dd></div>
+        <div><dt>Storage</dt><dd>{stream.storage}</dd></div>
+        <div><dt>Replicas</dt><dd>{stream.replicas}</dd></div>
+        <div><dt>Direct reads</dt><dd>{stream.allowDirect ? "Enabled" : "Disabled"}</dd></div>
+        <div><dt>Max age</dt><dd>{formatDuration(stream.maxAge)}</dd></div>
+        <div><dt>Message limit</dt><dd>{formatLimit(stream.maxMessages)}</dd></div>
+        <div><dt>Byte limit</dt><dd>{stream.maxBytes > 0 ? formatBytes(stream.maxBytes) : "Unlimited"}</dd></div>
+        <div><dt>Subjects</dt><dd>{stream.subjects.join(", ") || "None"}</dd></div>
+      </dl>
+      <div className="stream-consumers">
+        <h4>Consumers ({consumers.length})</h4>
+        {consumers.length ? consumers.map((consumer) => <StreamConsumerState key={consumer.name} consumer={consumer} />) : <div className="empty">No consumers configured</div>}
+      </div>
+    </>
+  );
+}
+
+function StreamConsumerState({ consumer }: { consumer: StreamConsumer }) {
+  return (
+    <article className="stream-consumer">
+      <div>
+        <strong>{consumer.name}</strong>
+        <span>{consumer.filterSubject || ">"}</span>
+      </div>
+      <span>{consumer.ackPolicy}</span>
+      <span>{consumer.pending.toLocaleString()} pending</span>
+      <span>{consumer.ackPending.toLocaleString()} ack pending</span>
+    </article>
+  );
 }
 
 function StreamPicker({
@@ -572,7 +725,7 @@ function Consumers({
   setStreamName: (v: string) => void;
   streams: Stream[];
 }) {
-  const info = useLoad<any>(
+  const info = useLoad<StreamInfo>(
     profileId && streamName
       ? `/profiles/${profileId}/streams/${encodeURIComponent(streamName)}`
       : null,
@@ -602,7 +755,7 @@ function Consumers({
           <Loading />
         ) : (
           <div className="cards">
-            {info.data?.consumers?.map((c: any) => (
+            {info.data?.consumers?.map((c) => (
               <article className="consumer" key={c.name}>
                 <div>
                   <span>CONSUMER</span>
@@ -1131,6 +1284,20 @@ function formatBytes(n: number) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
+
+function formatLimit(value: number) {
+  return value > 0 ? value.toLocaleString() : "Unlimited";
+}
+
+function formatDuration(nanoseconds: number) {
+  if (nanoseconds <= 0) return "Unlimited";
+  const seconds = nanoseconds / 1_000_000_000;
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${(seconds / 60).toFixed(1)} min`;
+  if (seconds < 86_400) return `${(seconds / 3600).toFixed(1)} hr`;
+  return `${(seconds / 86_400).toFixed(1)} days`;
+}
+
 const root = document.getElementById("root");
 if (root)
   createRoot(root).render(

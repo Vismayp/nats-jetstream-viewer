@@ -11,5 +11,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export interface Profile { id: string; name: string; servers: string[]; enabled: boolean; auth: { type: string; user?: string; configured: boolean }; tls: { configured: boolean; serverName?: string } }
 export interface Connection { id: string; name: string; servers: string[]; status: string; connectedAt?: string; error?: string; server?: string }
 export interface Stream { name: string; subjects: string[]; retention: string; storage: string; replicas: number; allowDirect: boolean; messages: number; bytes: number; firstSequence: number; lastSequence: number; consumerCount: number }
+export interface StreamConsumer { name: string; durableName?: string; ackPolicy: string; filterSubject?: string; delivered: { consumer_seq: number; stream_seq: number }; ackFloor: { consumer_seq: number; stream_seq: number }; pending: number; ackPending: number; redelivered: number }
+export interface StreamInfo { stream: Stream & { maxAge: number; maxMessages: number; maxBytes: number; deleted: number[] }; consumers: StreamConsumer[] }
 export interface Message { subject: string; sequence: number; timestamp: string; headers: Record<string, string[]>; payload: { utf8: string; base64: string }; size: number; decoded?: unknown; decoder?: { id: string; name: string; error?: string } }
 export interface Decoder { id: string; profileId: string; stream: string; name: string; script: string; enabled: boolean }
