@@ -130,7 +130,7 @@ export class NatsManager {
   }
 
   async messages(profileId: string, stream: string, options: { start: number; limit: number; subject?: string; decode?: boolean }) {
-    const { jsm, nc } = this.require(profileId);
+    const { jsm } = this.require(profileId);
     const info = await jsm!.streams.info(stream);
     const limit = Math.min(Math.max(options.limit, 1), 200);
     const messages: StoredMsg[] = [];

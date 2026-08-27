@@ -34,7 +34,7 @@ flowchart LR
 
 WorkQueue retention removes a message after a real consumer acknowledges it (or when a configured stream limit/TTL removes it). Stream Get and Direct Get query stream storage directly: they do not create a consumer, establish an ACK-pending state, advance a delivery cursor, or acknowledge a message.
 
-The integration suite creates a real WorkQueue stream and durable worker, publishes three messages, opens all three through the viewer, and asserts that:
+The integration suite starts two independent NATS systems: a real WorkQueue stream with a durable worker and a separate Limits-policy stream. It reads both through the viewer with stream-specific decoders, then asserts that the WorkQueue stream and worker remain unchanged:
 
 - the stream message count is unchanged;
 - the worker's pending count is unchanged;
