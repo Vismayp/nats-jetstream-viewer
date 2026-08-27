@@ -84,6 +84,7 @@ function Login({ onLogin }: { onLogin: () => void }) {
             <input
               autoFocus
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter deployment password"
