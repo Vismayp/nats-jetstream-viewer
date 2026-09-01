@@ -2,14 +2,27 @@ import { jetstreamManager, type JetStreamManager, type StoredMsg } from "@nats-i
 import { connect, credsAuthenticator, tokenAuthenticator, usernamePasswordAuthenticator, type NatsConnection, type NodeConnectionOptions } from "@nats-io/transport-node";
 import type { AppConfig, DecoderConfig, ServerProfile } from "./types.js";
 import { DecoderSandbox, type DecoderInput } from "./decoder.js";
+import { ReadOnlyGatewayClient, type GatewayMessage } from "./gateway.js";
 
 interface ManagedConnection {
   profile: ServerProfile;
   nc?: NatsConnection;
   jsm?: JetStreamManager;
+  gateway?: ReadOnlyGatewayClient;
   status: "connecting" | "connected" | "disconnected" | "error";
   error?: string;
   connectedAt?: string;
+}
+
+interface StreamSummary {
+  name: string; subjects: string[]; retention: string; storage: string; replicas: number;
+  allowDirect: boolean; messages: number; bytes: number; firstSequence: number;
+  lastSequence: number; consumerCount: number;
+}
+
+interface StreamInfoShape {
+  stream: StreamSummary & Record<string, unknown>;
+  consumers: unknown[];
 }
 
 function connectionOptions(profile: ServerProfile): NodeConnectionOptions {
@@ -54,6 +67,14 @@ export class NatsManager {
     const managed: ManagedConnection = { profile, status: "connecting" };
     this.connections.set(profile.id, managed);
     try {
+      if ((profile.mode ?? "nats") === "gateway") {
+        if (!profile.gateway) throw new Error("Gateway configuration is missing");
+        managed.gateway = new ReadOnlyGatewayClient(profile.gateway);
+        await managed.gateway.health();
+        managed.status = "connected";
+        managed.connectedAt = new Date().toISOString();
+        return;
+      }
       const nc = await connect(connectionOptions(profile));
       managed.nc = nc;
       managed.jsm = await jetstreamManager(nc);
@@ -87,19 +108,21 @@ export class NatsManager {
 
   statuses() {
     return [...this.connections.values()].map((c) => ({
-      id: c.profile.id, name: c.profile.name, servers: c.profile.servers, status: c.status,
+      id: c.profile.id, name: c.profile.name, mode: c.profile.mode ?? "nats", servers: c.profile.servers, status: c.status,
       connectedAt: c.connectedAt, error: c.error, server: c.nc?.getServer(),
+      gateway: c.profile.gateway ? { url: c.profile.gateway.url, upstreamProfileId: c.profile.gateway.upstreamProfileId } : undefined,
     }));
   }
 
   private require(profileId: string) {
     const managed = this.connections.get(profileId);
-    if (!managed?.jsm || !managed.nc || managed.status !== "connected") throw new Error(`Profile '${profileId}' is not connected`);
+    if (!managed || managed.status !== "connected" || (!managed.gateway && (!managed.jsm || !managed.nc))) throw new Error(`Profile '${profileId}' is not connected`);
     return managed;
   }
 
   async listStreams(profileId: string) {
-    const { jsm } = this.require(profileId);
+    const { jsm, gateway } = this.require(profileId);
+    if (gateway) return gateway.listStreams<StreamSummary[]>();
     const items = await jsm!.streams.list().next();
     return items.map((info) => ({
       name: info.config.name, subjects: info.config.subjects ?? [], retention: info.config.retention,
@@ -110,7 +133,8 @@ export class NatsManager {
   }
 
   async streamInfo(profileId: string, stream: string) {
-    const { jsm } = this.require(profileId);
+    const { jsm, gateway } = this.require(profileId);
+    if (gateway) return gateway.streamInfo<StreamInfoShape>(stream);
     const info = await jsm!.streams.info(stream);
     const consumers = await jsm!.consumers.list(stream).next();
     return {
@@ -130,7 +154,14 @@ export class NatsManager {
   }
 
   async messages(profileId: string, stream: string, options: { start: number; limit: number; subject?: string; decode?: boolean }) {
-    const { jsm } = this.require(profileId);
+    const { jsm, gateway } = this.require(profileId);
+    if (gateway) {
+      const page = await gateway.messages(stream, options);
+      const decoder = options.decode ? this.decoders.find((d) => d.enabled && d.profileId === profileId && d.stream === stream) : undefined;
+      const items = [];
+      for (const message of page.items) items.push(await this.decorate(message, decoder));
+      return { ...page, mode: "gateway", items };
+    }
     const info = await jsm!.streams.info(stream);
     const limit = Math.min(Math.max(options.limit, 1), 200);
     const messages: StoredMsg[] = [];
@@ -166,7 +197,13 @@ export class NatsManager {
   }
 
   async message(profileId: string, stream: string, sequence: number, decode = true) {
-    const { jsm } = this.require(profileId);
+    const { jsm, gateway } = this.require(profileId);
+    if (gateway) {
+      const message = await gateway.message(stream, sequence);
+      if (!message) return null;
+      const decoder = decode ? this.decoders.find((d) => d.enabled && d.profileId === profileId && d.stream === stream) : undefined;
+      return this.decorate(message, decoder);
+    }
     const message = await jsm!.streams.getMessage(stream, { seq: sequence });
     if (!message) return null;
     const decoder = decode ? this.decoders.find((d) => d.enabled && d.profileId === profileId && d.stream === stream) : undefined;
@@ -179,12 +216,23 @@ export class NatsManager {
       subject: message.subject, sequence: message.seq, timestamp: message.timestamp, headers,
       payload: { utf8: safeUtf8(message.data), base64: Buffer.from(message.data).toString("base64") },
     };
+    return this.decorate({ ...input, size: message.data.byteLength }, decoder);
+  }
+
+  private async decorate(message: GatewayMessage, decoder?: DecoderConfig) {
+    const input: DecoderInput = {
+      subject: message.subject,
+      sequence: message.sequence,
+      timestamp: message.timestamp,
+      headers: message.headers,
+      payload: message.payload,
+    };
     let decoded: unknown; let decoderError: string | undefined;
     if (decoder) {
       try { decoded = await this.sandbox.run(decoder.script, input); }
       catch (error) { decoderError = error instanceof Error ? error.message : String(error); }
     }
-    return { ...input, size: message.data.byteLength, decoded, decoder: decoder ? { id: decoder.id, name: decoder.name, error: decoderError } : undefined };
+    return { ...input, size: message.size, decoded, decoder: decoder ? { id: decoder.id, name: decoder.name, error: decoderError } : undefined };
   }
 }
 

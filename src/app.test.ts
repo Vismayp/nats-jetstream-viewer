@@ -11,12 +11,15 @@ import { NatsManager } from "./nats.js";
 
 describe("SPA fallback", () => {
   const previousWebRoot = process.env.NJV_WEB_ROOT;
+  const previousGatewayToken = process.env.NJV_GATEWAY_TOKEN;
+  const gatewayToken = "test-gateway-token-that-is-32-bytes-long";
   const manager = new NatsManager();
   let app: ReturnType<typeof createApp>;
 
   beforeAll(async () => {
     const directory = await mkdtemp(join(tmpdir(), "njv-app-"));
     process.env.NJV_WEB_ROOT = resolve("web");
+    process.env.NJV_GATEWAY_TOKEN = gatewayToken;
     const store = new ConfigStore(
       join(directory, "config.enc"),
       randomBytes(32).toString("base64"),
@@ -36,6 +39,8 @@ describe("SPA fallback", () => {
     await manager.close();
     if (previousWebRoot === undefined) delete process.env.NJV_WEB_ROOT;
     else process.env.NJV_WEB_ROOT = previousWebRoot;
+    if (previousGatewayToken === undefined) delete process.env.NJV_GATEWAY_TOKEN;
+    else process.env.NJV_GATEWAY_TOKEN = previousGatewayToken;
   });
 
   it.each(["/", "/connections", "/streams/WORK/messages"])(
@@ -49,5 +54,10 @@ describe("SPA fallback", () => {
 
   it("keeps API routes available", async () => {
     await request(app).get("/api/health").expect(200, { ok: true });
+  });
+
+  it("protects the read-only gateway with its bearer token", async () => {
+    await request(app).get("/gateway/v1/health").expect(401);
+    await request(app).get("/gateway/v1/health").set("Authorization", `Bearer ${gatewayToken}`).expect(200, { ok: true, readOnly: true });
   });
 });

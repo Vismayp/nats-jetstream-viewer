@@ -8,8 +8,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
-export interface Profile { id: string; name: string; servers: string[]; enabled: boolean; auth: { type: string; user?: string; configured: boolean }; tls: { configured: boolean; serverName?: string } }
-export interface Connection { id: string; name: string; servers: string[]; status: string; connectedAt?: string; error?: string; server?: string }
+export interface Profile { id: string; name: string; mode: "nats" | "gateway"; servers: string[]; enabled: boolean; auth: { type: string; user?: string; configured: boolean }; tls: { configured: boolean; serverName?: string }; gateway?: { url: string; upstreamProfileId: string; tokenConfigured: boolean } }
+export interface Connection { id: string; name: string; mode: "nats" | "gateway"; servers: string[]; status: string; connectedAt?: string; error?: string; server?: string; gateway?: { url: string; upstreamProfileId: string } }
 export interface Stream { name: string; subjects: string[]; retention: string; storage: string; replicas: number; allowDirect: boolean; messages: number; bytes: number; firstSequence: number; lastSequence: number; consumerCount: number }
 export interface StreamConsumer { name: string; durableName?: string; ackPolicy: string; filterSubject?: string; delivered: { consumer_seq: number; stream_seq: number }; ackFloor: { consumer_seq: number; stream_seq: number }; pending: number; ackPending: number; redelivered: number }
 export interface StreamInfo { stream: Stream & { maxAge: number; maxMessages: number; maxBytes: number; deleted: number[] }; consumers: StreamConsumer[] }

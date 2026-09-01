@@ -2,13 +2,14 @@
 
 A self-hosted, read-only operations console for inspecting messages stored in NATS JetStream—including streams using `WorkQueuePolicy`—without creating consumers, delivering messages, or sending acknowledgements.
 
-The viewer connects to several independent NATS systems at the same time, keeps credentials in an encrypted server-side configuration file, and supports sandboxed JavaScript unmarshalling per stream.
+The viewer connects to several independent NATS systems at the same time, keeps credentials in an encrypted server-side configuration file, and supports sandboxed JavaScript unmarshalling per stream. A central viewer that is not allowed to connect to NATS can instead use a bearer-protected read-only HTTP gateway exposed by a companion viewer inside the trusted NATS network.
 
 > **Safety invariant:** payloads are read only with JetStream Stream Get or Direct Get. The application contains no consumer creation, consumer fetch, ACK, stream purge, stream delete, or message delete operation.
 
 ## Capabilities
 
 - Multiple simultaneous NATS server/cluster profiles.
+- Direct NATS and read-only HTTP gateway profile modes.
 - Several seed URLs per profile for normal NATS failover.
 - Stored JetStream message browser with sequence pagination and subject filtering.
 - Direct Get batch reads when `allow_direct` is enabled.
@@ -33,6 +34,10 @@ flowchart LR
 ```
 
 WorkQueue retention removes a message after a real consumer acknowledges it (or when a configured stream limit/TTL removes it). Stream Get and Direct Get query stream storage directly: they do not create a consumer, establish an ACK-pending state, advance a delivery cursor, or acknowledge a message.
+
+A consumer is not a safe substitute for these APIs. `AckNone` consumers are rejected on WorkQueue streams, while an explicit-ack consumer that does not ACK still receives and reserves deliveries, advances consumer state, and competes with workers. The viewer therefore has no consumer-delivery mode.
+
+For a detailed explanation, failure examples, CLI experiment, and architecture comparison, open [`docs/why-consumer-viewing-is-unsafe.html`](docs/why-consumer-viewing-is-unsafe.html).
 
 The integration suite starts two independent NATS systems: a real WorkQueue stream with a durable worker and a separate Limits-policy stream. It reads both through the viewer with stream-specific decoders, then asserts that the WorkQueue stream and worker remain unchanged:
 
@@ -108,6 +113,35 @@ _INBOX.>
 ```
 
 Do not grant ACK, consumer-create, purge, delete, or update subjects. This turns the safety invariant into a server-enforced authorization boundary as well as an application rule.
+
+## Read-only HTTP gateway mode
+
+Use gateway mode when the central viewer cannot connect to NATS. Some component must still have authorized access to JetStream storage; deploy a companion viewer inside the trusted NATS network for that role.
+
+```mermaid
+flowchart LR
+  Central["Central viewer<br/>no NATS access"] -->|"HTTPS + bearer token"| Edge["Companion viewer"]
+  Edge -->|"Stream Get / Direct Get only"| JS["JetStream streams<br/>any retention policy"]
+  Worker["Real workers"] -->|"consumer delivery + ACK"| JS
+```
+
+On the companion viewer:
+
+1. Configure a normal direct-NATS profile with the restricted permissions listed above.
+2. Set a random gateway token in its environment:
+
+   ```bash
+   NJV_GATEWAY_TOKEN=<at-least-32-byte-random-secret>
+   ```
+
+3. Expose the companion viewer to the central viewer through HTTPS. The gateway is available under `/gateway/v1/*` and accepts only the bearer token; it does not use the browser admin session.
+4. Note the direct profile ID shown on the Connections page.
+
+On the central viewer, add a connection and choose **Read-only HTTP gateway**. Enter the companion viewer base URL, its direct profile ID, and the same gateway token. Gateway credentials are encrypted at rest and never returned to the browser after saving.
+
+The gateway forwards stream lists, stream/consumer metadata, and stored-message reads. It forces decoding off at the companion and applies any configured decoder in the central viewer. It exposes no publish, consumer fetch/create, ACK, purge, update, or delete endpoint.
+
+If neither the viewer nor a trusted companion is permitted to connect to NATS or call the read-only JetStream APIs, live inspection is impossible. The remaining safe architecture is an administrator-configured server-side republish into a separate Limits-policy audit stream, followed by storage-only access to that audit stream.
 
 ### Enable Direct Get
 

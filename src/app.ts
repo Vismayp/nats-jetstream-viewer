@@ -3,7 +3,7 @@ import helmet from "helmet";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { Auth, requireSameOrigin } from "./auth.js";
+import { Auth, requireBearerToken, requireSameOrigin } from "./auth.js";
 import { ConfigStore, profileSchema, publicProfile } from "./config.js";
 import { DecoderSandbox } from "./decoder.js";
 import { NatsManager } from "./nats.js";
@@ -69,6 +69,31 @@ export function createApp(
     auth.clear(res);
     res.json({ authenticated: false });
   });
+
+  app.use("/gateway/v1", requireBearerToken(process.env.NJV_GATEWAY_TOKEN));
+  app.get("/gateway/v1/health", (_req, res) => res.json({ ok: true, readOnly: true }));
+  app.get("/gateway/v1/profiles/:profileId/streams", async (req, res) =>
+    res.json(await manager.listStreams(req.params.profileId)),
+  );
+  app.get("/gateway/v1/profiles/:profileId/streams/:stream", async (req, res) =>
+    res.json(await manager.streamInfo(req.params.profileId, req.params.stream)),
+  );
+  app.get(
+    "/gateway/v1/profiles/:profileId/streams/:stream/messages",
+    async (req, res) => {
+      const query = messageQuery.parse({ ...req.query, decode: "false" });
+      res.json(await manager.messages(req.params.profileId, req.params.stream, query));
+    },
+  );
+  app.get(
+    "/gateway/v1/profiles/:profileId/streams/:stream/messages/:sequence",
+    async (req, res) => {
+      const sequence = z.coerce.number().int().positive().parse(req.params.sequence);
+      const message = await manager.message(req.params.profileId, req.params.stream, sequence, false);
+      if (!message) return res.status(404).json({ error: "Message is no longer stored" });
+      return res.json(message);
+    },
+  );
 
   app.use("/api", auth.require);
   app.get("/api/profiles", (_req, res) =>

@@ -1075,13 +1075,13 @@ function Connections({
                 </div>
                 <div className="connection-main">
                   <b>{p.name}</b>
-                  <span>{p.servers.join(", ")}</span>
+                  <span>{p.mode === "gateway" ? `${p.gateway?.url} · upstream ${p.gateway?.upstreamProfileId}` : p.servers.join(", ")}</span>
                 </div>
                 <span className={`tag ${c?.status === "error" ? "warn" : ""}`}>
                   {c?.status ?? "disabled"}
                 </span>
                 <small>
-                  {p.auth.type} · {tls}
+                  {p.mode === "gateway" ? "HTTP gateway · bearer token" : `${p.auth.type} · ${tls}`} · ID {p.id}
                 </small>
                 <button
                   className="danger"
@@ -1120,6 +1120,7 @@ function ConnectionEditor({
   onSave: (v: unknown) => Promise<void>;
 }) {
   const [name, setName] = useState("");
+  const [mode, setMode] = useState<"nats" | "gateway">("nats");
   const [servers, setServers] = useState("nats://localhost:4222");
   const [authType, setAuthType] = useState("none");
   const [user, setUser] = useState("");
@@ -1128,6 +1129,9 @@ function ConnectionEditor({
   const [tlsCa, setTlsCa] = useState("");
   const [tlsCert, setTlsCert] = useState("");
   const [tlsKey, setTlsKey] = useState("");
+  const [gatewayUrl, setGatewayUrl] = useState("");
+  const [upstreamProfileId, setUpstreamProfileId] = useState("");
+  const [gatewayToken, setGatewayToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const submit = async () => {
@@ -1148,8 +1152,16 @@ function ConnectionEditor({
     setBusy(true);
     setError("");
     try {
-      await onSave({
+      await onSave(mode === "gateway" ? {
         name,
+        mode,
+        servers: [],
+        enabled: true,
+        auth: { type: "none" },
+        gateway: { url: gatewayUrl, upstreamProfileId, token: gatewayToken },
+      } : {
+        name,
+        mode,
         servers: servers
           .split(/[,\n]/)
           .map((x) => x.trim())
@@ -1170,12 +1182,12 @@ function ConnectionEditor({
         className="modal compact"
         role="dialog"
         aria-modal="true"
-        aria-label="Add NATS system"
+        aria-label="Add data source"
       >
         <div className="section-head">
           <div>
             <span>CONNECTION PROFILE</span>
-            <h3>Add NATS system</h3>
+            <h3>Add data source</h3>
           </div>
           <button aria-label="Close connection editor" onClick={onClose}>
             ×
@@ -1190,26 +1202,53 @@ function ConnectionEditor({
           />
         </label>
         <label>
-          Seed URLs
-          <textarea
-            className="short"
-            value={servers}
-            onChange={(e) => setServers(e.target.value)}
-          />
-          <small>Comma or newline separated URLs in the same cluster.</small>
-        </label>
-        <label>
-          Authentication
-          <select
-            value={authType}
-            onChange={(e) => setAuthType(e.target.value)}
-          >
-            <option value="none">None</option>
-            <option value="userpass">Username + password</option>
-            <option value="token">Token</option>
-            <option value="creds">NATS .creds contents</option>
+          Access mode
+          <select value={mode} onChange={(e) => setMode(e.target.value as "nats" | "gateway")}>
+            <option value="nats">Direct NATS storage reads</option>
+            <option value="gateway">Read-only HTTP gateway</option>
           </select>
+          <small>{mode === "gateway" ? "This viewer makes no NATS connection. A trusted companion viewer performs storage-only reads." : "Uses Stream Get or Direct Get. Consumer delivery is never used."}</small>
         </label>
+        {mode === "gateway" ? (
+          <>
+            <label>
+              Gateway base URL
+              <input value={gatewayUrl} onChange={(e) => setGatewayUrl(e.target.value)} placeholder="https://viewer-edge.example.com/" />
+            </label>
+            <label>
+              Upstream profile ID
+              <input value={upstreamProfileId} onChange={(e) => setUpstreamProfileId(e.target.value)} placeholder="production" />
+            </label>
+            <label>
+              Gateway bearer token
+              <textarea className="short" value={gatewayToken} onChange={(e) => setGatewayToken(e.target.value)} />
+              <small>Must match NJV_GATEWAY_TOKEN on the companion viewer.</small>
+            </label>
+            <div className="banner">Consumer mode is intentionally unavailable: it can reserve or compete for WorkQueue messages.</div>
+          </>
+        ) : (
+          <>
+            <label>
+              Seed URLs
+              <textarea
+                className="short"
+                value={servers}
+                onChange={(e) => setServers(e.target.value)}
+              />
+              <small>Comma or newline separated URLs in the same cluster.</small>
+            </label>
+            <label>
+              Authentication
+              <select
+                value={authType}
+                onChange={(e) => setAuthType(e.target.value)}
+              >
+                <option value="none">None</option>
+                <option value="userpass">Username + password</option>
+                <option value="token">Token</option>
+                <option value="creds">NATS .creds contents</option>
+              </select>
+            </label>
         {authType === "userpass" && (
           <label>
             Username
@@ -1261,6 +1300,8 @@ function ConnectionEditor({
             />
           </label>
         </details>
+          </>
+        )}
         {error && <div className="banner error">{error}</div>}
         <footer>
           <button disabled={busy} onClick={onClose}>

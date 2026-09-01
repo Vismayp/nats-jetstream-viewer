@@ -21,4 +21,19 @@ describe("ConfigStore", () => {
     expect(JSON.stringify(view)).not.toContain("hidden");
     expect(view.auth).toEqual({ type: "userpass", user: "reader", configured: true });
   });
+
+  it("encrypts and redacts read-only gateway tokens", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "njv-gateway-config-"));
+    const path = join(dir, "config.enc"); const key = randomBytes(32).toString("base64");
+    const store = new ConfigStore(path, key); await store.load();
+    const token = "gateway-token-that-is-at-least-32-bytes";
+    await store.upsertProfile({
+      id: "remote", name: "Remote", mode: "gateway", servers: [], enabled: true, auth: { type: "none" },
+      gateway: { url: "https://viewer-edge.example.com", upstreamProfileId: "production", token },
+    });
+    expect(await readFile(path, "utf8")).not.toContain(token);
+    const view = publicProfile(store.snapshot().profiles[0]!);
+    expect(JSON.stringify(view)).not.toContain(token);
+    expect(view.gateway).toEqual({ url: "https://viewer-edge.example.com", upstreamProfileId: "production", tokenConfigured: true });
+  });
 });

@@ -50,3 +50,15 @@ export function requireSameOrigin(req: Request, res: Response, next: NextFunctio
   } catch { /* rejected below */ }
   return res.status(403).json({ error: "Cross-origin request rejected" });
 }
+
+export function requireBearerToken(token: string | undefined) {
+  if (token && Buffer.byteLength(token) < 32) throw new Error("NJV_GATEWAY_TOKEN must be at least 32 bytes");
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!token) return res.status(404).json({ error: "Read-only gateway is disabled" });
+    const authorization = req.headers.authorization ?? "";
+    const candidate = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+    const a = Buffer.from(candidate); const b = Buffer.from(token);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return res.status(401).json({ error: "Invalid gateway token" });
+    return next();
+  };
+}

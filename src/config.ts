@@ -14,12 +14,28 @@ const authSchema = z.discriminatedUnion("type", [
 export const profileSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   name: z.string().min(1).max(80),
+  mode: z.enum(["nats", "gateway"]).default("nats"),
   servers: z.array(z.string().regex(/^(nats|tls):\/\//).refine((value) => {
     try { const url = new URL(value); return !url.username && !url.password; } catch { return false; }
-  }, "Credentials must use the authentication fields, not the server URL")).min(1).max(16),
+  }, "Credentials must use the authentication fields, not the server URL")).max(16).default([]),
   enabled: z.boolean().default(true),
-  auth: authSchema,
+  auth: authSchema.default({ type: "none" }),
   tls: z.object({ ca: z.string().optional(), cert: z.string().optional(), key: z.string().optional(), serverName: z.string().optional() }).optional(),
+  gateway: z.object({
+    url: z.string().url().refine((value) => {
+      const url = new URL(value);
+      return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
+    }, "Gateway URL must be HTTP(S) and must not contain credentials"),
+    upstreamProfileId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
+    token: z.string().min(32).max(4096),
+  }).optional(),
+}).superRefine((profile, context) => {
+  if (profile.mode === "nats" && profile.servers.length === 0) {
+    context.addIssue({ code: "custom", path: ["servers"], message: "At least one NATS server URL is required" });
+  }
+  if (profile.mode === "gateway" && !profile.gateway) {
+    context.addIssue({ code: "custom", path: ["gateway"], message: "Gateway configuration is required" });
+  }
 });
 
 export const decoderSchema = z.object({
@@ -100,12 +116,19 @@ export class ConfigStore {
 }
 
 export function publicProfile(profile: ServerProfile): PublicProfile {
+  const mode = profile.mode ?? "nats";
   return {
     id: profile.id,
     name: profile.name,
+    mode,
     servers: profile.servers,
     enabled: profile.enabled,
     auth: { type: profile.auth.type, user: profile.auth.type === "userpass" ? profile.auth.user : undefined, configured: profile.auth.type !== "none" },
     tls: { configured: Boolean(profile.tls?.ca || profile.tls?.cert || profile.tls?.key), serverName: profile.tls?.serverName },
+    gateway: mode === "gateway" && profile.gateway ? {
+      url: profile.gateway.url,
+      upstreamProfileId: profile.gateway.upstreamProfileId,
+      tokenConfigured: Boolean(profile.gateway.token),
+    } : undefined,
   };
 }

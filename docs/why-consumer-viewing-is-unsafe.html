@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Why a JetStream Consumer Cannot Be a Read-Only Viewer</title>
+  <style>
+    :root {
+      --bg: #07100e;
+      --panel: #0b1713;
+      --panel-2: #10231c;
+      --line: #24443a;
+      --text: #e6f2ed;
+      --muted: #9db2aa;
+      --green: #89f5b5;
+      --yellow: #ffd37a;
+      --red: #ff9385;
+      --blue: #8ad7ff;
+      --code: #050b09;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 80% 0%, rgba(28, 102, 72, .22), transparent 34rem),
+        linear-gradient(180deg, #08130f 0, var(--bg) 24rem);
+      color: var(--text);
+      font: 16px/1.65 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--green); }
+    code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+    header, main, footer { width: min(1120px, calc(100% - 32px)); margin-inline: auto; }
+    header { padding: 72px 0 36px; }
+    .eyebrow { color: var(--green); font-size: .78rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { max-width: 850px; margin: 10px 0 14px; font-size: clamp(2.2rem, 6vw, 4.7rem); line-height: 1.02; letter-spacing: -.045em; }
+    h2 { margin: 0 0 16px; font-size: clamp(1.5rem, 3vw, 2.2rem); line-height: 1.2; }
+    h3 { margin: 28px 0 10px; font-size: 1.18rem; }
+    p { margin: 0 0 16px; }
+    .lead { max-width: 850px; color: var(--muted); font-size: 1.18rem; }
+    .verdict { margin-top: 28px; padding: 20px 22px; border: 1px solid #3e6958; border-left: 5px solid var(--green); background: rgba(16, 35, 28, .88); border-radius: 10px; }
+    nav { margin: 28px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+    nav a { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); text-decoration: none; background: rgba(11, 23, 19, .75); }
+    nav a:hover { color: var(--text); border-color: var(--green); }
+    section { margin: 22px 0; padding: 30px; border: 1px solid var(--line); border-radius: 14px; background: rgba(11, 23, 19, .92); box-shadow: 0 18px 55px rgba(0, 0, 0, .16); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .card { padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+    .card h3 { margin-top: 0; }
+    .bad { border-left: 4px solid var(--red); }
+    .warn { border-left: 4px solid var(--yellow); }
+    .good { border-left: 4px solid var(--green); }
+    .note { color: var(--muted); }
+    .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 12px; margin: 24px 0; }
+    .node { min-height: 112px; display: grid; place-content: center; text-align: center; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+    .node strong { display: block; color: var(--green); }
+    .arrow { color: var(--yellow); font-weight: 800; text-align: center; }
+    pre { overflow-x: auto; margin: 14px 0 20px; padding: 18px; border: 1px solid #1d352d; border-radius: 10px; background: var(--code); color: #d5e7df; font-size: .9rem; line-height: 1.55; }
+    :not(pre) > code { padding: .12em .35em; border: 1px solid #254239; border-radius: 5px; color: #b8f6d1; background: #0a1511; }
+    table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: .94rem; }
+    th, td { padding: 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--green); background: #0e2019; }
+    td { background: #091510; }
+    .yes { color: var(--green); font-weight: 750; }
+    .no { color: var(--red); font-weight: 750; }
+    .conditional { color: var(--yellow); font-weight: 750; }
+    ol, ul { padding-left: 1.4rem; }
+    li + li { margin-top: 8px; }
+    .sequence { counter-reset: step; list-style: none; padding: 0; }
+    .sequence li { position: relative; padding: 2px 0 20px 48px; }
+    .sequence li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--green); border-radius: 50%; color: var(--green); font-weight: 800; }
+    .sequence li:not(:last-child)::after { content: ""; position: absolute; left: 14px; top: 34px; bottom: 2px; border-left: 1px dashed #3b6253; }
+    footer { padding: 24px 0 64px; color: var(--muted); }
+    @media (max-width: 760px) {
+      header { padding-top: 44px; }
+      section { padding: 21px; }
+      .grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">NATS JetStream Viewer · Safety Design</div>
+    <h1>Why a consumer cannot be a read-only message viewer</h1>
+    <p class="lead">A JetStream consumer is a delivery state machine. Receiving through it changes delivery state even when the client does not send an ACK. That makes a consumer unsuitable for observing every stream without competing with workers or changing retention behavior.</p>
+    <div class="verdict"><strong>Design decision:</strong> this viewer never creates, binds to, or fetches from a consumer. It reads stored messages with Stream Get or Direct Get, either directly or through the companion read-only HTTP gateway.</div>
+    <nav aria-label="Document sections">
+      <a href="#requirements">Requirements</a>
+      <a href="#proof">Why impossible</a>
+      <a href="#consumer-model">Consumer model</a>
+      <a href="#workqueue">WorkQueue failures</a>
+      <a href="#experiment">CLI experiment</a>
+      <a href="#comparison">Comparison</a>
+      <a href="#gateway">Safe gateway</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="requirements">
+      <h2>The required guarantees</h2>
+      <p>The requested viewer must satisfy all of these conditions at the same time:</p>
+      <div class="grid">
+        <article class="card good"><h3>All retention policies</h3><p>Inspect messages still stored in Limits, Interest, and WorkQueue streams.</p></article>
+        <article class="card good"><h3>No competition</h3><p>Never take a delivery that should have gone to a real worker.</p></article>
+        <article class="card good"><h3>No acknowledgement</h3><p>Never send ACK, NAK, TERM, progress, or any other consumer acknowledgement.</p></article>
+        <article class="card good"><h3>No delivery mutation</h3><p>Do not advance a cursor, create ACK-pending state, increment attempts, or trigger redelivery.</p></article>
+      </div>
+      <p class="note">A consumer fails at least one of these requirements. Storage retrieval satisfies them because it queries the stream's stored record instead of requesting delivery.</p>
+    </section>
+
+    <section id="proof">
+      <h2>Why the requirements are mutually incompatible</h2>
+      <p>This is not merely a limitation of the viewer implementation. It follows from what a JetStream consumer means: a consumer exists to select messages and ask the server to deliver them. Once delivery is requested, the server must account for who received the message and whether the work is complete.</p>
+
+      <div class="verdict"><strong>Short proof:</strong> a consumer must use an acknowledgement policy. WorkQueue rejects <code>AckNone</code>. An explicit-ack consumer either ACKs, violating “no ACK,” or does not ACK, leaving the message assigned and pending, violating “no competition” and “no state change.” Therefore no consumer configuration satisfies all requirements.</div>
+
+      <h3>Exhaust every possible acknowledgement choice</h3>
+      <table>
+        <thead><tr><th>Consumer choice</th><th>What the server must do</th><th>Requirement that fails</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>AckPolicy=None</code></td>
+            <td>Deliver without waiting for a client ACK. WorkQueue cannot safely know that processing completed, so NATS rejects this consumer policy for WorkQueue streams.</td>
+            <td><span class="no">“All policies” fails</span> because it cannot be used on WorkQueue.</td>
+          </tr>
+          <tr>
+            <td><code>AckPolicy=Explicit</code>, then ACK</td>
+            <td>Mark the delivery complete. On WorkQueue, the ACK makes the message eligible for immediate removal.</td>
+            <td><span class="no">“No ACK” fails</span>, and viewing could delete work before a worker processes it.</td>
+          </tr>
+          <tr>
+            <td><code>AckPolicy=Explicit</code>, do not ACK</td>
+            <td>Record an outstanding ACK, keep the delivery assigned until <code>AckWait</code>, then redeliver it and increment attempts.</td>
+            <td><span class="no">“No competition” and “no state change” fail</span>.</td>
+          </tr>
+          <tr>
+            <td><code>AckPolicy=All</code></td>
+            <td>An ACK can cumulatively acknowledge this and earlier deliveries. Not ACKing has the same pending/redelivery problem as explicit ACK.</td>
+            <td><span class="no">Either “no ACK” or “no competition” fails</span>; it also cannot provide the required WorkQueue explicit-ACK behavior.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Consumer placement does not solve it</h3>
+      <div class="grid">
+        <article class="card bad">
+          <h3>Create a new viewer consumer</h3>
+          <p>On WorkQueue, its filter cannot overlap the worker consumer. A non-overlapping filter sees only a partition, not all messages.</p>
+        </article>
+        <article class="card bad">
+          <h3>Share the existing worker consumer</h3>
+          <p>The viewer becomes another worker in the pool. Delivery goes to either the viewer or a real worker, so the viewer necessarily competes.</p>
+        </article>
+      </div>
+
+      <h3>The key distinction: observation versus delivery</h3>
+      <p>A viewer wants to ask, “What bytes are currently stored at stream sequence 42?” A consumer asks, “Which message should this consumer receive next?” Those are different server operations with different semantics:</p>
+      <pre><code>Storage observation:
+  Stream Get(sequence=42) → return stored bytes
+  No consumer selected, no delivery assigned, no ACK expected
+
+Consumer delivery:
+  Consumer Next() → select and assign work to this consumer
+  Delivery cursor advances; ACK handling or redelivery must follow</code></pre>
+      <p>Only the first operation can be guaranteed to be non-competing and acknowledgement-free across all retention policies.</p>
+    </section>
+
+    <section id="consumer-model">
+      <h2>A consumer is not a database read</h2>
+      <p>A JetStream consumer stores server-side state: delivery policy, filter subjects, delivered sequence, acknowledgement floor, ACK-pending messages, redelivery attempts, waiting pulls, and optional limits. A fetch asks the server to perform delivery through that state machine.</p>
+      <div class="flow" aria-label="Consumer delivery flow">
+        <div class="node"><strong>Viewer</strong>Fetch next message</div>
+        <div class="arrow">→</div>
+        <div class="node"><strong>Consumer</strong>Advance delivered sequence<br>Create pending ACK</div>
+        <div class="arrow">→</div>
+        <div class="node"><strong>Stream</strong>Message may later be redelivered or removed</div>
+      </div>
+      <p>Not sending an ACK does not undo delivery. For an explicit-ack consumer, the server has already assigned the message to that consumer, advanced its delivered sequence, and recorded the message as awaiting acknowledgement.</p>
+
+      <h3>Two meanings of “no ACK”</h3>
+      <table>
+        <thead><tr><th>Term</th><th>Meaning</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td><code>AckPolicy=None</code></td><td>A consumer configuration in which the server does not expect client acknowledgements.</td><td>Rejected for WorkQueue streams; on policies where it is allowed, delivery is still performed and may satisfy retention interest.</td></tr>
+          <tr><td><code>consumer next --no-ack</code></td><td>A CLI instruction not to ACK a message delivered by an explicit-ack consumer.</td><td>The consumer remains explicit-ack. Delivery advances and the message becomes ACK-pending, then eligible for redelivery.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="workqueue">
+      <h2>Why each consumer approach fails on WorkQueue</h2>
+
+      <article class="card bad">
+        <h3>Approach 1: create an AckNone consumer</h3>
+        <p>WorkQueue retention removes a message after a worker completes it and explicitly acknowledges it. NATS therefore requires WorkQueue consumers to use explicit acknowledgements. Creating an <code>AckNone</code> consumer is rejected by the server.</p>
+        <pre><code>nats consumer add WORK viewer --pull --ack none --filter "jobs.&gt;" --defaults
+
+# Expected result:
+# consumer creation fails because a WorkQueue consumer must use explicit ACKs</code></pre>
+      </article>
+
+      <article class="card bad">
+        <h3>Approach 2: create a separate explicit-ack consumer</h3>
+        <p>WorkQueue consumers cannot have overlapping filters because two consumers would claim the same work. If a real worker consumer already covers <code>jobs.&gt;</code>, a viewer consumer with the same or overlapping filter is rejected.</p>
+        <pre><code># Existing worker covers jobs.&gt;
+nats consumer add WORK worker --pull --ack explicit --filter "jobs.&gt;" --defaults
+
+# Viewer overlaps the worker and should be rejected
+nats consumer add WORK viewer --pull --ack explicit --filter "jobs.&gt;" --defaults</code></pre>
+        <p>Non-overlapping filters may be allowed, but that partitions the workload. It does not let the viewer inspect all messages.</p>
+      </article>
+
+      <article class="card bad">
+        <h3>Approach 3: bind the viewer to the worker's existing consumer</h3>
+        <p>Multiple clients can pull from one consumer as a worker pool. If the viewer binds to that consumer, it joins the pool and competes with production workers. A message delivered to the viewer is temporarily unavailable to another worker until it is ACKed, NAKed, or redelivered after <code>AckWait</code>.</p>
+        <ol class="sequence">
+          <li>The viewer requests one message from the worker consumer.</li>
+          <li>The server assigns that job to the viewer and increments the delivered sequence.</li>
+          <li>The viewer does not ACK, so outstanding ACKs increase.</li>
+          <li>The real worker does not receive that job during the ACK wait.</li>
+          <li>After timeout, the server redelivers it with a higher delivery-attempt count.</li>
+        </ol>
+      </article>
+
+      <article class="card warn">
+        <h3>Operational consequences</h3>
+        <ul>
+          <li><strong>Worker delay:</strong> work is held until timeout.</li>
+          <li><strong>False redeliveries:</strong> delivery attempts increase even though processing never began.</li>
+          <li><strong>MaxDeliver risk:</strong> repeated viewing can exhaust the configured delivery limit and terminate normal retries.</li>
+          <li><strong>Backpressure:</strong> enough unacknowledged views can reach <code>MaxAckPending</code> and pause delivery.</li>
+          <li><strong>Misleading monitoring:</strong> delivered sequence, ACK pending, redelivery count, and lag no longer represent worker activity alone.</li>
+          <li><strong>Race conditions:</strong> a worker may ACK and remove a WorkQueue message while the viewer is displaying stale information.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section id="other-policies">
+      <h2>Why “it works on Limits” is not enough</h2>
+      <p>A separate consumer can be created on a Limits-policy stream, but it still advances delivery state and consumes server resources. On Interest retention, adding or delivering through a consumer can participate in the definition of whether a message still has interest. A universal viewer cannot switch to consumer delivery only for some policies without changing its safety model and observable behavior.</p>
+      <table>
+        <thead><tr><th>Retention policy</th><th>Consumer viewing problem</th><th>Storage Get behavior</th></tr></thead>
+        <tbody>
+          <tr><td>Limits</td><td>Usually does not remove the stream message, but creates/advances consumer state and can produce ACK-pending/redelivery activity.</td><td>Returns the stored record without delivery state.</td></tr>
+          <tr><td>Interest</td><td>The consumer represents interest. Delivery and acknowledgement policy can affect when data is considered complete and removable.</td><td>Observes only what is currently stored; does not add interest.</td></tr>
+          <tr><td>WorkQueue</td><td>AckNone is rejected; overlapping consumers are rejected; sharing the worker consumer competes for jobs.</td><td>Observes the stored job without claiming it.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="experiment">
+      <h2>Reproducible CLI experiment</h2>
+      <p>The following PowerShell experiment demonstrates both facts: AckNone creation fails, while an explicit-ack consumer can receive without ACK but changes delivery state and causes redelivery.</p>
+      <pre><code># Create a small WorkQueue stream
+nats stream add WORK --subjects "jobs.&gt;" --retention work --storage file --defaults
+nats stream info WORK
+
+# Publish one job
+nats pub jobs.email "job-1"
+
+# Test 1 — this must fail
+nats consumer add WORK noack --pull --ack none --filter "jobs.&gt;" --defaults
+
+# Test 2 — explicit ACK consumer succeeds
+nats consumer add WORK worker --pull --ack explicit --filter "jobs.&gt;" --wait 2s --defaults
+
+# Receive, but suppress the CLI ACK
+nats consumer next WORK worker --count 1 --no-ack
+
+# Observe Outstanding Acks = 1 and the message still stored
+nats consumer info WORK worker
+nats stream info WORK
+
+# Wait past AckWait and fetch again
+Start-Sleep -Seconds 3
+nats consumer next WORK worker --count 1 --no-ack
+
+# The same stream sequence is delivered again, normally with tries = 2
+nats consumer info WORK worker</code></pre>
+      <div class="verdict"><strong>Interpretation:</strong> “I did not ACK” is not the same as “I did not consume.” The first fetch already changed consumer state and temporarily claimed the work.</div>
+    </section>
+
+    <section id="comparison">
+      <h2>Technique comparison</h2>
+      <table>
+        <thead><tr><th>Technique</th><th>Reads payload</th><th>Works on WorkQueue</th><th>No competition</th><th>No ACK state</th><th>Suitable</th></tr></thead>
+        <tbody>
+          <tr><td>AckNone consumer</td><td class="yes">Yes</td><td class="no">No</td><td class="conditional">Policy-dependent</td><td class="conditional">Delivery still occurs</td><td class="no">No</td></tr>
+          <tr><td>New explicit consumer</td><td class="yes">Yes</td><td class="no">Overlaps rejected</td><td class="no">No</td><td class="no">No</td><td class="no">No</td></tr>
+          <tr><td>Bind to worker consumer</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">Competes directly</td><td class="no">Creates pending ACK</td><td class="no">No</td></tr>
+          <tr><td>Stream Get</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+          <tr><td>Direct Get</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+          <tr><td>Read-only HTTP gateway</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="gateway">
+      <h2>The safe design when the central viewer cannot access NATS</h2>
+      <div class="flow" aria-label="Read-only gateway architecture">
+        <div class="node"><strong>Central viewer</strong>No NATS connection</div>
+        <div class="arrow">HTTPS →</div>
+        <div class="node"><strong>Companion viewer</strong>Bearer-protected GET endpoints</div>
+        <div class="arrow">Storage Get →</div>
+        <div class="node"><strong>JetStream</strong>Limits, Interest, WorkQueue</div>
+      </div>
+      <p>The companion viewer is deployed inside the trusted network. Its NATS identity is restricted to stream listing, stream information, message Get/Direct Get, and optional consumer information. It has no ACK or mutation permissions. The central viewer talks to the companion through HTTPS and never opens a NATS connection.</p>
+
+      <h3>Companion configuration</h3>
+      <pre><code># Generate a random token
+openssl rand -base64 32
+
+# Set on the companion viewer
+NJV_GATEWAY_TOKEN=&lt;generated-token&gt;</code></pre>
+      <p>The companion exposes only bearer-protected <code>GET /gateway/v1/*</code> routes for health, stream metadata, and stored messages.</p>
+
+      <h3>Central viewer configuration</h3>
+      <ol>
+        <li>Open <strong>Connections</strong> and choose <strong>Read-only HTTP gateway</strong>.</li>
+        <li>Enter the companion viewer's HTTPS base URL.</li>
+        <li>Enter the direct NATS profile ID displayed by the companion.</li>
+        <li>Enter the same gateway token.</li>
+      </ol>
+      <p>The token is encrypted in the central viewer's configuration. Raw messages cross the gateway, and decoder scripts run in the central viewer.</p>
+
+      <h3>Hard boundary</h3>
+      <div class="card warn"><p>If neither the viewer nor any trusted companion is allowed to connect to NATS or invoke read-only JetStream storage APIs, live viewing is impossible. A consumer does not bypass that restriction—it is also a NATS connection using consumer API subjects. The remaining safe option is an administrator-configured republish into a separate Limits-policy audit stream or an approved external export pipeline.</p></div>
+    </section>
+
+    <section id="references">
+      <h2>References</h2>
+      <ul>
+        <li><a href="https://docs.nats.io/learn/jetstream/retention-policies">NATS JetStream retention policies</a></li>
+        <li><a href="https://docs.nats.io/using-nats/developer/develop_jetstream/consumers">NATS JetStream consumers</a></li>
+        <li><a href="../README.md">Project README and gateway deployment instructions</a></li>
+        <li><a href="../WORKQUEUE-VALIDATION.md">WorkQueue CLI validation procedure</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>NATS JetStream Viewer safety note. The governing invariant is simple: observation must query stored state, never request consumer delivery.</p>
+  </footer>
+</body>
+</html>
